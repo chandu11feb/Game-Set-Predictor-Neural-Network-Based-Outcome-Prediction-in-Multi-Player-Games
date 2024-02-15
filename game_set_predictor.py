@@ -8,40 +8,62 @@ import torch
 import torch.nn as nn
 
 NUM_PLAYERS = 3
-NUM_SETS = 20
+NUM_SETS = 70
 
+
+# class Predictor(nn.Module):
+#     def __init__(self, input_size, hidden_size, output_size):
+#         """
+#         Initialize the Predictor class.
+#
+#         Parameters:
+#             input_size (int): The number of expected features in the input x.
+#             hidden_size (int): The number of features in the hidden state h.
+#             output_size (int): The number of output features.
+#         """
+#         super(Predictor, self).__init__()
+#         # LSTM layer with input_size as input dimension and hidden_size as output dimension
+#         self.lstm = nn.LSTM(input_size, hidden_size)
+#         # Fully connected layer to map hidden_size to output_size
+#         self.fc = nn.Linear(hidden_size, output_size)
+#
+#     def forward(self, x):
+#         """
+#         Define the forward pass of the Predictor class.
+#         Parameters:
+#             x (torch.Tensor): The input data.
+#         Returns:
+#             torch.Tensor: The output prediction.
+#         """
+#         # Pass the input through the LSTM layer
+#         x, _ = self.lstm(x)
+#         # Take the last hidden state as the output
+#         x = x[-1]
+#         # Pass the last hidden state through the fully connected layer
+#         x = self.fc(x)
+#         return x
 
 class Predictor(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        """
-        Initialize the Predictor class.
-
-        Parameters:
-            input_size (int): The number of expected features in the input x.
-            hidden_size (int): The number of features in the hidden state h.
-            output_size (int): The number of output features.
-        """
+    def __init__(self, input_size, hidden_size, output_size, num_layers=1, bidirectional=False):
         super(Predictor, self).__init__()
-        # LSTM layer with input_size as input dimension and hidden_size as output dimension
-        self.lstm = nn.LSTM(input_size, hidden_size)
-        # Fully connected layer to map hidden_size to output_size
-        self.fc = nn.Linear(hidden_size, output_size)
+        self.num_layers = num_layers
+        self.bidirectional = bidirectional
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers=num_layers, bidirectional=bidirectional)
+        self.fc1 = nn.Linear(hidden_size * 2 if bidirectional else hidden_size, hidden_size)  # Output size is doubled if bidirectional
+        self.fc2 = nn.Linear(hidden_size, output_size)
 
     def forward(self, x):
-        """
-        Define the forward pass of the Predictor class.
-        Parameters:
-            x (torch.Tensor): The input data.
-        Returns:
-            torch.Tensor: The output prediction.
-        """
-        # Pass the input through the LSTM layer
-        x, _ = self.lstm(x)
-        # Take the last hidden state as the output
-        x = x[-1]
-        # Pass the last hidden state through the fully connected layer
-        x = self.fc(x)
-        return x
+        lstm_out, _ = self.lstm(x)
+        if self.bidirectional:
+            # lstm_out shape: (seq_len, batch, num_directions * hidden_size)
+            lstm_out = torch.cat((lstm_out[-1, :, :self.lstm.hidden_size], lstm_out[0, :, self.lstm.hidden_size:]),
+                                 dim=1)
+        else:
+            # lstm_out shape: (seq_len, batch, hidden_size)
+            lstm_out = lstm_out[-1] # Take the last hidden state
+        out = self.fc1(lstm_out)
+        out = self.fc2(out)
+        return out
 def predict_winner2(model, initial_winner):
     # Initialize the sequence with the initial winner
     sequence = [int(initial_winner)]  # Ensure integer type
@@ -59,7 +81,7 @@ def predict_winner2(model, initial_winner):
         # Pass input data through the model to get predictions
         with torch.no_grad():
             output = model(input_data.float())
-        # print(output)
+        print(output)
 
         # Get the predicted winner for the current set
         predicted_winner = torch.argmax(output).item()
@@ -81,7 +103,7 @@ def predict_winner2(model, initial_winner):
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model_path = "set_predictor_model.pth"
+model_path = "set_predictor_model1.pth"
 model = torch.load(model_path, map_location=device)
 model.eval()
 
